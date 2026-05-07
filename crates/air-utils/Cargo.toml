@@ -14,3 +14,6 @@ stwo-air-utils-derive = { path = "../air-utils-derive", version = "2.2.0" }
 
 [lib]
 bench = false
+
+[features]
+simd-backend = []

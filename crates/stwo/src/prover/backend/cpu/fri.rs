@@ -1,4 +1,6 @@
 use super::CpuBackend;
+use itertools::Itertools;
+
 use crate::core::circle::Coset;
 use crate::core::fft::ibutterfly;
 use crate::core::fields::m31::BaseField;
@@ -76,9 +78,9 @@ pub fn fold_line_cpu(
     let folded_values = eval
         .values
         .into_iter()
-        .array_chunks()
+        .tuples::<(_, _)>()
         .enumerate()
-        .map(|(i, [f_x, f_neg_x])| {
+        .map(|(i, (f_x, f_neg_x))| {
             // TODO(andrew): Inefficient. Update when domain twiddles get stored in a buffer.
             let x = domain.at(bit_reverse_index(i << 1, domain.log_size()));
 
@@ -104,9 +106,9 @@ pub fn fold_circle_into_line_cpu(
 
     src.values
         .into_iter()
-        .array_chunks()
+        .tuples::<(_, _)>()
         .enumerate()
-        .for_each(|(i, [f_p, f_neg_p])| {
+        .for_each(|(i, (f_p, f_neg_p))| {
             // TODO(andrew): Inefficient. Update when domain twiddles get stored in a buffer.
             let p = domain.at(bit_reverse_index(i << 1, domain.log_size()));
 

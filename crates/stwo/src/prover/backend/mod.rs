@@ -13,6 +13,7 @@ use crate::prover::vcs_lifted::ops::MerkleOpsLifted;
 use crate::prover::{AccumulationOps, QuotientOps};
 
 pub mod cpu;
+#[cfg(feature = "simd-backend")]
 pub mod simd;
 
 pub trait Backend:
