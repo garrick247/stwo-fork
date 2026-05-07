@@ -261,9 +261,11 @@ impl PolyOps for CpuBackend {
 
         let mut itwiddles = vec![BaseField::zero(); twiddles.len()];
         twiddles
-            .array_chunks::<CHUNK_SIZE>()
-            .zip(itwiddles.array_chunks_mut::<CHUNK_SIZE>())
+            .chunks_exact(CHUNK_SIZE)
+            .zip(itwiddles.chunks_exact_mut(CHUNK_SIZE))
             .for_each(|(src, dst)| {
+                let src: &[BaseField; CHUNK_SIZE] = src.try_into().unwrap();
+                let dst: &mut [BaseField; CHUNK_SIZE] = dst.try_into().unwrap();
                 batch_inverse_in_place(src, dst);
             });
 
@@ -340,9 +342,11 @@ fn circle_twiddles_from_line_twiddles(
     //   [x, y]
     // Works also for inverse of the twiddles.
     first_line_twiddles
-        .iter()
-        .array_chunks()
-        .flat_map(|[&x, &y]| [y, -y, -x, x])
+        .chunks_exact(2)
+        .flat_map(|c| {
+            let [x, y] = <&[_; 2]>::try_from(c).unwrap();
+            [*y, -*y, -*x, *x]
+        })
 }
 
 impl<F: ExtensionOf<BaseField>, EvalOrder> IntoIterator
