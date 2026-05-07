@@ -41,7 +41,7 @@ impl FriConfig {
     const LOG_LAST_LAYER_DEGREE_BOUND_RANGE: RangeInclusive<u32> =
         Self::LOG_MIN_LAST_LAYER_DEGREE_BOUND..=Self::LOG_MAX_LAST_LAYER_DEGREE_BOUND;
 
-    const LOG_MIN_BLOWUP_FACTOR: u32 = 1;
+    const LOG_MIN_BLOWUP_FACTOR: u32 = 0; // VortexSTARK cuda-backend patch: allow log_blowup_factor=0
     const LOG_MAX_BLOWUP_FACTOR: u32 = 16;
     const LOG_BLOWUP_FACTOR_RANGE: RangeInclusive<u32> =
         Self::LOG_MIN_BLOWUP_FACTOR..=Self::LOG_MAX_BLOWUP_FACTOR;
