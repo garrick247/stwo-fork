@@ -1,4 +1,4 @@
-#![cfg_attr(feature = "prover", feature(portable_simd))]
+#![cfg_attr(feature = "simd-backend", feature(portable_simd))]
 #![cfg_attr(not(feature = "std"), no_std)]
 
 /// ! This module contains helpers to express and use constraints for components.
@@ -25,7 +25,11 @@ use preprocessed_columns::PreProcessedColumnId;
 #[cfg(all(feature = "prover", feature = "std"))]
 pub use prover::{
     assert_constraints_on_polys, assert_constraints_on_trace, relation_tracker, AssertEvaluator,
-    CpuDomainEvaluator, FractionWriter, LogupColGenerator, LogupTraceGenerator,
+    CpuDomainEvaluator,
+};
+#[cfg(all(feature = "prover", feature = "std", feature = "simd-backend"))]
+pub use prover::{
+    FractionWriter, LogupColGenerator, LogupTraceGenerator,
     SimdDomainEvaluator,
 };
 use std_shims::Vec;
