@@ -1,7 +1,7 @@
 use hashbrown::HashMap;
 use itertools::Itertools;
 use num_traits::Zero;
-use tracing::instrument;
+use tracing::{instrument, span, Level};
 
 use crate::core::channel::{Channel, MerkleChannel};
 use crate::core::fields::m31::BaseField;
@@ -115,10 +115,18 @@ impl<'a, B: FriOps + MerkleOpsLifted<MC::H>, MC: MerkleChannel> FriProver<'a, B,
     ) -> Self {
         assert!(column.domain.is_canonic(), "not canonic");
 
-        let first_layer = Self::commit_first_layer(channel, &config, column);
-        let (inner_layers, last_layer_evaluation) =
-            Self::commit_inner_layers(channel, config, column, twiddles);
-        let last_layer_poly = Self::commit_last_layer(channel, config, last_layer_evaluation);
+        let first_layer = {
+            let _s = span!(Level::INFO, "FRI commit_first_layer", log_size = column.domain.log_size()).entered();
+            Self::commit_first_layer(channel, &config, column)
+        };
+        let (inner_layers, last_layer_evaluation) = {
+            let _s = span!(Level::INFO, "FRI commit_inner_layers").entered();
+            Self::commit_inner_layers(channel, config, column, twiddles)
+        };
+        let last_layer_poly = {
+            let _s = span!(Level::INFO, "FRI commit_last_layer").entered();
+            Self::commit_last_layer(channel, config, last_layer_evaluation)
+        };
 
         Self {
             config,
@@ -153,7 +161,10 @@ impl<'a, B: FriOps + MerkleOpsLifted<MC::H>, MC: MerkleChannel> FriProver<'a, B,
         let mut layers = Vec::new();
         let folding_alpha = channel.draw_secure_felt();
 
-        let mut layer_evaluation = B::fold_circle_into_line(column, folding_alpha, twiddles);
+        let mut layer_evaluation = {
+            let _s = span!(Level::INFO, "FRI fold_circle_into_line", log_size = column.domain.log_size()).entered();
+            B::fold_circle_into_line(column, folding_alpha, twiddles)
+        };
         let mut line_log_size = layer_evaluation.domain().log_size();
 
         // Apply any additional line folds requested for the first stage.
@@ -176,22 +187,36 @@ impl<'a, B: FriOps + MerkleOpsLifted<MC::H>, MC: MerkleChannel> FriProver<'a, B,
         }
         // While we can, skip `config.fold_step` layers.
         while line_log_size > last_layer_log_domain_size + config.fold_step {
-            let layer = FriInnerLayerProver::new(layer_evaluation, config.fold_step);
+            let _s = span!(Level::INFO, "FRI inner_layer", log_size = line_log_size, fold_step = config.fold_step).entered();
+            let layer = {
+                let _ms = span!(Level::INFO, "FRI inner_layer Merkle commit", log_size = line_log_size).entered();
+                FriInnerLayerProver::new(layer_evaluation, config.fold_step)
+            };
             MC::mix_root(channel, layer.merkle_tree.root());
             let folding_alpha = channel.draw_secure_felt();
             let alpha_sq_powers = squared_alpha_powers(folding_alpha, config.fold_step);
-            layer_evaluation = B::fold_line(&layer.evaluation, &alpha_sq_powers, twiddles);
+            layer_evaluation = {
+                let _fs = span!(Level::INFO, "FRI fold_line", log_size = line_log_size).entered();
+                B::fold_line(&layer.evaluation, &alpha_sq_powers, twiddles)
+            };
             layers.push(layer);
             line_log_size -= config.fold_step;
         }
 
         // Do one last fold (of size 0 < k <= config.fold_step) to reach the correct size.
         let last_fold_step = line_log_size - last_layer_log_domain_size;
-        let layer = FriInnerLayerProver::new(layer_evaluation, last_fold_step);
+        let _s = span!(Level::INFO, "FRI inner_layer final", log_size = line_log_size, fold_step = last_fold_step).entered();
+        let layer = {
+            let _ms = span!(Level::INFO, "FRI inner_layer Merkle commit", log_size = line_log_size).entered();
+            FriInnerLayerProver::new(layer_evaluation, last_fold_step)
+        };
         MC::mix_root(channel, layer.merkle_tree.root());
         let folding_alpha = channel.draw_secure_felt();
         let alpha_sq_powers = squared_alpha_powers(folding_alpha, last_fold_step);
-        layer_evaluation = B::fold_line(&layer.evaluation, &alpha_sq_powers, twiddles);
+        layer_evaluation = {
+            let _fs = span!(Level::INFO, "FRI fold_line", log_size = line_log_size).entered();
+            B::fold_line(&layer.evaluation, &alpha_sq_powers, twiddles)
+        };
         layers.push(layer);
 
         (layers, layer_evaluation)
