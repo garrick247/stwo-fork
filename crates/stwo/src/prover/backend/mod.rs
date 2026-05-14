@@ -60,6 +60,12 @@ pub trait Column<T>: Clone + Debug + FromIterator<T> + Send + Sync {
     }
     /// Retrieves the element at the given index.
     fn at(&self, index: usize) -> T;
+    /// Batched read of elements at many positions. Default impl repeats at(); backends
+    /// with non-trivial at() overhead (e.g., a single-element D->H memcpy per call) should
+    /// override this with a one-shot transfer.
+    fn gather(&self, positions: &[usize]) -> Vec<T> {
+        positions.iter().map(|&p| self.at(p)).collect()
+    }
     /// Sets the element at the given index.
     fn set(&mut self, index: usize, value: T);
     /// Splits the column into two halves.

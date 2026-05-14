@@ -103,16 +103,17 @@ impl<B: MerkleOpsLifted<H>, H: MerkleHasherLifted> MerkleProverLifted<B, H> {
         let mut decommitment = MerkleDecommitmentLifted::<H>::default();
         let mut all_node_values: Vec<HashMap<usize, <H as MerkleHasherLifted>::Hash>> = vec![];
 
-        // Compute the queried values.
+        // Compute the queried values. Batched gather collapses N single-element
+        // device->host memcpys into one PCIe transfer per column for GPU backends.
         let max_log_size = self.layers.len() - 1;
         for col in columns.iter() {
             let log_size = col.len().ilog2() as usize;
             let shift = max_log_size - log_size;
-            let res: Vec<_> = query_positions
+            let transformed: Vec<usize> = query_positions
                 .iter()
-                .map(|pos| col.at((pos >> (shift + 1) << 1) + (pos & 1)))
+                .map(|pos| (pos >> (shift + 1) << 1) + (pos & 1))
                 .collect();
-            queried_values.push(res);
+            queried_values.push(col.gather(&transformed));
         }
 
         let mut prev_layer_queries = query_positions.to_vec();
@@ -130,25 +131,37 @@ impl<B: MerkleOpsLifted<H>, H: MerkleHasherLifted> MerkleProverLifted<B, H> {
             // Each layer node is a hash of column values as previous layer hashes.
             // Prepare the previous layer hashes to read from.
             let prev_layer_hashes = self.layers.get(layer_log_size + 1).unwrap();
-            // All chunks have either length 1 (only one child is present) or 2 (both children are
-            // present).
-            for queries_chunk in prev_layer_queries.as_slice().chunk_by(|a, b| a ^ 1 == *b) {
+            // Two-pass: collect all read positions, do one gather(), then process.
+            let chunks: Vec<&[usize]> = prev_layer_queries
+                .as_slice()
+                .chunk_by(|a, b| a ^ 1 == *b)
+                .collect();
+            let mut positions: Vec<usize> = Vec::with_capacity(chunks.len() * 3);
+            for queries_chunk in &chunks {
                 let first = queries_chunk[0];
-                // If the brother of `first` was not queried before, add its hash to the witness.
                 if queries_chunk.len() == 1 {
-                    decommitment
-                        .hash_witness
-                        .push(prev_layer_hashes.at(first ^ 1))
+                    positions.push(first ^ 1);
+                }
+                let curr_index = first >> 1;
+                positions.push(2 * curr_index);
+                positions.push(2 * curr_index + 1);
+            }
+            let gathered = prev_layer_hashes.gather(&positions);
+            let mut cursor = 0usize;
+            for queries_chunk in &chunks {
+                let first = queries_chunk[0];
+                if queries_chunk.len() == 1 {
+                    decommitment.hash_witness.push(gathered[cursor]);
+                    cursor += 1;
                 }
                 let curr_index = first >> 1;
                 curr_layer_queries.push(curr_index);
-
-                // Add the previous layer hashes to all_node_values.
-                all_node_values_for_layer
-                    .insert(2 * curr_index, prev_layer_hashes.at(2 * curr_index));
-                all_node_values_for_layer
-                    .insert(2 * curr_index + 1, prev_layer_hashes.at(2 * curr_index + 1));
+                all_node_values_for_layer.insert(2 * curr_index, gathered[cursor]);
+                cursor += 1;
+                all_node_values_for_layer.insert(2 * curr_index + 1, gathered[cursor]);
+                cursor += 1;
             }
+            debug_assert_eq!(cursor, gathered.len());
             // Propagate queries to the next layer.
             prev_layer_queries = curr_layer_queries;
 
