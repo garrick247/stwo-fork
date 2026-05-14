@@ -226,6 +226,7 @@ impl<'a, B: BackendForChannel<MC>, MC: MerkleChannel> CommitmentSchemeProver<'a,
 
         let columns = self.evaluations();
         print_column_size_histogram::<B, MC>(&columns);
+        let _span_cfq = span!(Level::INFO, "compute_fri_quotients (outer)").entered();
         // Compute oods quotients for boundary constraints on the sampled points.
         let quotients = compute_fri_quotients(
             &columns,
@@ -235,10 +236,13 @@ impl<'a, B: BackendForChannel<MC>, MC: MerkleChannel> CommitmentSchemeProver<'a,
             self.twiddles,
             self.config.fri_config.log_blowup_factor,
         );
+        drop(_span_cfq);
 
         // Run FRI commitment phase on the oods quotients.
+        let _span_fri_commit = span!(Level::INFO, "FriProver::commit (outer)").entered();
         let fri_prover =
             FriProver::<B, MC>::commit(channel, self.config.fri_config, &quotients, self.twiddles);
+        drop(_span_fri_commit);
 
         // Proof of work.
         let span1 = span!(Level::INFO, "Grind", class = "Queries POW").entered();
@@ -247,11 +251,13 @@ impl<'a, B: BackendForChannel<MC>, MC: MerkleChannel> CommitmentSchemeProver<'a,
         channel.mix_u64(proof_of_work);
 
         // FRI decommitment phase.
+        let _span_fri_decom = span!(Level::INFO, "FRI decommit").entered();
         let FriDecommitResult {
             fri_proof,
             query_positions,
             unsorted_query_locations,
         } = fri_prover.decommit(channel);
+        drop(_span_fri_decom);
         // Build the query position tree.
         let preprocessed_query_positions = prepare_preprocessed_query_positions(
             &query_positions,
@@ -272,15 +278,20 @@ impl<'a, B: BackendForChannel<MC>, MC: MerkleChannel> CommitmentSchemeProver<'a,
                 .collect::<Vec<_>>(),
         );
         let commitments = self.roots();
+        let _span_tree_decom = span!(Level::INFO, "Tree decommit (all trees)").entered();
         let (queried_values, decommitments, aux): (Vec<_>, Vec<_>, Vec<_>) = self
             .trees
             .as_ref()
             .zip_eq(query_positions_tree)
-            .map(|(tree, query_positions)| tree.decommit(query_positions))
+            .map(|(tree, query_positions)| {
+                let _s = span!(Level::INFO, "Tree decommit (one)").entered();
+                tree.decommit(query_positions)
+            })
             .0
             .into_iter()
             .map(|(v, x)| (v, x.decommitment, x.aux))
             .multiunzip();
+        drop(_span_tree_decom);
 
         // Return evaluation buffers to the memory pool for reuse (owned trees only).
         for tree in &mut self.trees.0 {
