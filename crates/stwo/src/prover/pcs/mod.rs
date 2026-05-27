@@ -76,6 +76,7 @@ impl<'a, B: BackendForChannel<MC>, MC: MerkleChannel> CommitmentSchemeProver<'a,
     /// the channel, and appends the resulting tree to the scheme.
     fn commit(&mut self, polynomials: ColumnVec<CircleCoefficients<B>>, channel: &mut MC::C) {
         let _span = span!(Level::INFO, "Commitment").entered();
+        let s_new = span!(Level::INFO, "PCS: CommitmentTreeProver::new (scheme.commit)").entered();
         let tree = CommitmentTreeProver::new(
             polynomials,
             self.config.fri_config.log_blowup_factor,
@@ -84,8 +85,16 @@ impl<'a, B: BackendForChannel<MC>, MC: MerkleChannel> CommitmentSchemeProver<'a,
             self.config.lifting_log_size,
             &self.base_column_pool,
         );
-        MC::mix_root(channel, tree.commitment.root());
+        s_new.exit();
+        let s_root = span!(Level::INFO, "PCS: tree.commitment.root()").entered();
+        let root = tree.commitment.root();
+        s_root.exit();
+        let s_mix = span!(Level::INFO, "PCS: MC::mix_root").entered();
+        MC::mix_root(channel, root);
+        s_mix.exit();
+        let s_push = span!(Level::INFO, "PCS: trees.push").entered();
         self.trees.push(MaybeOwned::Owned(tree));
+        s_push.exit();
     }
 
     /// Appends an externally constructed [`CommitmentTreeProver`] to the scheme and mixes its
@@ -387,20 +396,23 @@ impl<B: BackendForChannel<MC>, MC: MerkleChannel> CommitmentTreeProver<B, MC> {
         span.exit();
 
         let _span = span!(Level::INFO, "Merkle").entered();
+        let s_meta = span!(Level::INFO, "PCS: max_log_domain_size + lifting").entered();
         let max_log_domain_size = polynomials
             .iter()
             .map(|poly| poly.evals.domain.log_size())
             .max()
             .unwrap_or_default();
         let lifting_log_size = lifting_log_size.unwrap_or(max_log_domain_size);
-        let tree = MerkleProverLifted::commit(
-            polynomials
-                .iter()
-                .map(|poly: &Poly<B>| &poly.evals.values)
-                .collect(),
-            lifting_log_size,
-            0,
-        );
+        s_meta.exit();
+        let s_collect = span!(Level::INFO, "PCS: collect col refs").entered();
+        let cols: Vec<_> = polynomials
+            .iter()
+            .map(|poly: &Poly<B>| &poly.evals.values)
+            .collect();
+        s_collect.exit();
+        let s_mpl = span!(Level::INFO, "PCS: MerkleProverLifted::commit").entered();
+        let tree = MerkleProverLifted::commit(cols, lifting_log_size, 0);
+        s_mpl.exit();
 
         CommitmentTreeProver {
             polynomials,
